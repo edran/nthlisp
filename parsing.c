@@ -28,6 +28,53 @@ void add_history(char* unused) {}
 
 #endif
 
+#define DEBUG 0
+
+enum { LVAL_NUM, LVAL_ERR };
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+
+/* Declare New lval Struct */
+typedef struct {
+  int type;
+  long num;
+  int err;
+} lval;
+
+lval lval_num(long x) {
+  lval v;
+  v.type = LVAL_NUM;
+  v.num = x;
+  return v;
+}
+
+/* Create a new error type lval */
+lval lval_err(int x) {
+  lval v;
+  v.type = LVAL_ERR;
+  v.err = x;
+  return v;
+}
+
+/* Print an "lval" */
+void lval_print(lval v) {
+  switch (v.type) {
+    /* In the case the type is a number print it, then 'break' out of the switch. */
+    case LVAL_NUM: printf("%li", v.num); break;
+
+    /* In the case the type is an error */
+    case LVAL_ERR:
+      /* Check What exact type of error it is and print it */
+      if (v.err == LERR_DIV_ZERO) { printf("Error: Division By Zero!"); }
+      if (v.err == LERR_BAD_OP)   { printf("Error: Invalid Operator!"); }
+      if (v.err == LERR_BAD_NUM)  { printf("Error: Invalid Number!"); }
+    break;
+  }
+}
+
+/* Print an "lval" followed by a newline */
+void lval_println(lval v) { lval_print(v); putchar('\n'); }
+
+
 long min(int x, int y) {
   if (x < y) {
     return x;
@@ -44,16 +91,22 @@ long max(int x, int y) {
   }
 }
 
-long eval_op(long x, char* op, long y) {
-  if (strcmp(op, "+") == 0) { return x + y; }
-  if (strcmp(op, "-") == 0) { return x - y; }
-  if (strcmp(op, "*") == 0) { return x * y; }
-  if (strcmp(op, "/") == 0) { return x / y; }
-  if (strcmp(op, "%") == 0) { return x % y; }
-  if (strcmp(op, "^") == 0) { return pow(x, y); }
-  if (strcmp(op, "min") == 0) { return min(x, y); }
-  if (strcmp(op, "max") == 0) { return max(x, y); }
-  return 0;
+lval eval_op(lval x, char* op, lval y) {
+
+  if (x.type == LVAL_ERR) { return x; }
+  if (y.type == LVAL_ERR) { return x; }
+
+  if (strcmp(op, "+") == 0) { return lval_num(x.num + y.num); }
+  if (strcmp(op, "-") == 0) { return lval_num(x.num - y.num); }
+  if (strcmp(op, "*") == 0) { return lval_num(x.num * y.num); }
+  if (strcmp(op, "/") == 0) {
+    return y.num == 0 ? lval_err(LERR_DIV_ZERO) : lval_num(x.num / y.num);
+  }
+  if (strcmp(op, "%") == 0) { return lval_num( x.num % y.num); }
+  if (strcmp(op, "^") == 0) { return lval_num(pow(x.num, y.num)); }
+  if (strcmp(op, "min") == 0) { return lval_num(min(x.num, y.num)); }
+  if (strcmp(op, "max") == 0) { return lval_num(max(x.num, y.num)); }
+  return lval_err(LERR_BAD_OP);
 }
 
 int number_of_nodes(mpc_ast_t* t) {
@@ -89,16 +142,20 @@ int branches_num(mpc_ast_t* t) {
   return count;
 }
 
-long eval(mpc_ast_t* t) {
+lval eval(mpc_ast_t* t) {
 
   /* If tagged as number return it directly, otherwise expression. */
-  if (strstr(t->tag, "number")) { return atoi(t->contents); }
+  if (strstr(t->tag, "number")) {
+    errno = 0;
+    long x = strtol(t->contents, NULL, 10);
+    return errno != ERANGE ? lval_num(x) : lval_err(LERR_BAD_NUM);
+  }
 
   /* The operator is always second child. */
   char* op = t->children[1]->contents;
 
   /* We store the third child in `x` */
-  long x = eval(t->children[2]);
+  lval x = eval(t->children[2]);
 
   /* Iterate the remaining children, combining using our operator */
   int i = 3;
@@ -139,15 +196,9 @@ int main(int argc, char** argv) {
     mpc_result_t r;
     if (mpc_parse("<stdin>", input, Nthlisp, &r)) {
      /* On Success Print the AST */
-      long result = eval(r.output);
-      int leaves = leaves_num(r.output);
-      int branches = branches_num(r.output);
-      int nodes = number_of_nodes(r.output);
-      printf("Result:  %li\n", result);
-      printf("Nodes:   %i\n", nodes);
-      printf("Leaves:  %i\n", leaves);
-      printf("Branches:%i\n", branches);
-      mpc_ast_print(r.output);
+      lval result = eval(r.output);
+      lval_println(result);
+      if (DEBUG) { mpc_ast_print(r.output); }
       mpc_ast_delete(r.output);
 
     } else {
